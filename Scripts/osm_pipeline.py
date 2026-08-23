@@ -5,9 +5,11 @@ Usage:
     python osm_pipeline.py --bbox "minlat,minlon,maxlat,maxlon" --out district.json [--obj preview.obj]
 """
 import argparse
+import base64
 import json
 import math
 import random
+import struct
 import sys
 import urllib.parse
 import urllib.request
@@ -386,31 +388,174 @@ def write_obj(path, buildings, roads):
     print(f"[obj  ] {path}: {v_off - 1} vertices")
 
 
+CATEGORY_COLORS = {
+    "medical": (0.90, 0.25, 0.25), "emergency": (0.95, 0.45, 0.10),
+    "education": (0.95, 0.80, 0.30), "food": (0.95, 0.60, 0.20),
+    "hardware": (0.55, 0.40, 0.25), "weapons_outdoors": (0.20, 0.45, 0.20),
+    "fuel": (0.60, 0.30, 0.70), "retail": (0.20, 0.65, 0.60),
+    "office": (0.35, 0.50, 0.75), "industrial": (0.45, 0.48, 0.52),
+    "residential": (0.82, 0.72, 0.58), "civic": (0.85, 0.50, 0.70),
+    "unknown": (0.60, 0.60, 0.60),
+}
+ROAD_COLOR = (0.35, 0.35, 0.38)
+ROAD_HEIGHT_M = {
+    "motorway": 0.15, "trunk": 0.15, "primary": 0.15, "secondary": 0.12,
+    "tertiary": 0.10, "residential": 0.10, "unclassified": 0.08,
+    "service": 0.06, "living_street": 0.08, "pedestrian": 0.06,
+    "footway": 0.04, "cycleway": 0.04, "path": 0.04, "steps": 0.04,
+    "track": 0.06,
+}
+
+
+def write_gltf(path, buildings, roads):
+    """Spec-compliant glTF 2.0 preview: meters, Y-up, double-sided materials."""
+    materials, primitives = [], []
+    views, accessors = [], []
+    chunks = []
+    offset = 0
+
+    def add_view(data):
+        nonlocal offset
+        while offset % 4:
+            chunks.append(b"\x00")
+            offset += 1
+        start = offset
+        chunks.append(data)
+        offset += len(data)
+        views.append({"buffer": 0, "byteOffset": start,
+                      "byteLength": len(data)})
+        return len(views) - 1
+
+    def add_primitive(points, triangles, color):
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        zs = [p[2] for p in points]
+        pos_view = add_view(b"".join(struct.pack("<3f", *p) for p in points))
+        idx_view = add_view(b"".join(struct.pack("<3I", *t) for t in triangles))
+        accessors.append({
+            "bufferView": pos_view, "componentType": 5126,
+            "count": len(points), "type": "VEC3",
+            "min": [min(xs), min(ys), min(zs)],
+            "max": [max(xs), max(ys), max(zs)],
+        })
+        pos_acc = len(accessors) - 1
+        accessors.append({
+            "bufferView": idx_view, "componentType": 5125,
+            "count": len(triangles) * 3, "type": "SCALAR",
+        })
+        materials.append({
+            "pbrMetallicRoughness":
+                {"baseColorFactor": [round(c, 3) for c in color] + [1.0]},
+            "doubleSided": True,
+        })
+        primitives.append({
+            "attributes": {"POSITION": pos_acc},
+            "indices": len(accessors) - 1,
+            "material": len(materials) - 1,
+        })
+
+    for b in buildings:
+        ring = b["footprint"]
+        h = b["height_m"]
+        n = len(ring)
+        pts = [(x, 0.0, -y) for x, y in ring] + [(x, h, -y) for x, y in ring]
+        tris = []
+        for i in range(n):
+            j = (i + 1) % n
+            tris += [(i, j, n + j), (i, n + j, n + i)]
+        tris += [(n + a, n + c, n + bb)
+                 for a, bb, c in triangulate_ring(ring)]
+        add_primitive(pts, tris,
+                      CATEGORY_COLORS.get(b["category"],
+                                          CATEGORY_COLORS["unknown"]))
+
+    for r in roads:
+        pts_2d = r["polyline"]
+        w = r["width_m"] / 2.0
+        elev = ROAD_HEIGHT_M.get(r["class"], 0.05)
+        left, right = [], []
+        for k in range(len(pts_2d)):
+            x, y = pts_2d[k]
+            if k == 0:
+                dx, dy = pts_2d[1][0] - x, pts_2d[1][1] - y
+            elif k == len(pts_2d) - 1:
+                dx, dy = x - pts_2d[k - 1][0], y - pts_2d[k - 1][1]
+            else:
+                dx = pts_2d[k + 1][0] - pts_2d[k - 1][0]
+                dy = pts_2d[k + 1][1] - pts_2d[k - 1][1]
+            length = math.hypot(dx, dy) or 1.0
+            nx, ny = -dy / length * w, dx / length * w
+            left.append((x + nx, y + ny))
+            right.append((x - nx, y - ny))
+        pts = [(lx, elev, -ly) for lx, ly in left] + \
+              [(rx, elev, -ry) for rx, ry in right]
+        m = len(left)
+        tris = []
+        for k in range(m - 1):
+            lk, rk = k, m + k
+            tris += [(lk, rk, rk + 1), (lk, rk + 1, lk + 1)]
+        add_primitive(pts, tris, ROAD_COLOR)
+
+    blob = base64.b64encode(b"".join(chunks)).decode("ascii")
+    doc = {
+        "asset": {"version": "2.0", "generator": "hometown osm_pipeline"},
+        "scene": 0,
+        "scenes": [{"nodes": [0]}],
+        "nodes": [{"mesh": 0}],
+        "meshes": [{"primitives": primitives}],
+        "materials": materials,
+        "buffers": [{
+            "byteLength": offset,
+            "uri": "data:application/octet-stream;base64," + blob,
+        }],
+        "bufferViews": views,
+        "accessors": accessors,
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(doc, fh)
+    print(f"[gltf ] {path}: {len(primitives)} primitives, "
+          f"{offset} bytes geometry")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--bbox", required=True,
-                    help="minlat,minlon,maxlat,maxlon")
+    ap.add_argument("--bbox", help="minlat,minlon,maxlat,maxlon")
+    ap.add_argument("--from-json", dest="from_json",
+                    help="build previews from an existing district.json (skips fetch)")
     ap.add_argument("--out", default="district.json")
     ap.add_argument("--obj", help="optional Wavefront OBJ preview path")
+    ap.add_argument("--gltf", help="optional glTF 2.0 preview path (recommended for UE)")
     args = ap.parse_args()
 
-    try:
-        bbox = tuple(float(v) for v in args.bbox.split(","))
-        if len(bbox) != 4:
-            raise ValueError
-    except ValueError:
-        raise SystemExit("bbox must be four comma-separated numbers: "
-                         "minlat,minlon,maxlat,maxlon")
+    if args.from_json:
+        with open(args.from_json, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        bbox = tuple(doc["bbox"])
+        buildings, roads, skipped = doc["buildings"], doc["roads"], 0
+        print(f"[load ] {args.from_json}: {len(buildings)} buildings, "
+              f"{len(roads)} road segments")
+    else:
+        if not args.bbox:
+            raise SystemExit("either --bbox or --from-json is required")
+        try:
+            bbox = tuple(float(v) for v in args.bbox.split(","))
+            if len(bbox) != 4:
+                raise ValueError
+        except ValueError:
+            raise SystemExit("bbox must be four comma-separated numbers: "
+                             "minlat,minlon,maxlat,maxlon")
+        elements = fetch_overpass(args.bbox)["elements"]
+        buildings, roads, pois, skipped = process(elements, bbox)
+        if not buildings:
+            raise SystemExit("No buildings found in bbox — check coordinates.")
+        resolved, matched = join_pois(buildings, pois)
+        print(f"[join ] {matched}/{len(pois)} POI nodes fell inside footprints; "
+              f"{resolved} 'unknown' buildings re-classified")
+        write_json(args.out, bbox, buildings, roads, skipped)
 
-    elements = fetch_overpass(args.bbox)["elements"]
-    buildings, roads, pois, skipped = process(elements, bbox)
-    if not buildings:
-        raise SystemExit("No buildings found in bbox — check coordinates.")
-    resolved, matched = join_pois(buildings, pois)
-    print(f"[join ] {matched}/{len(pois)} POI nodes fell inside footprints; "
-          f"{resolved} 'unknown' buildings re-classified")
-    write_json(args.out, bbox, buildings, roads, skipped)
-    if args.obj:
+    if args.gltf and buildings:
+        write_gltf(args.gltf, buildings, roads)
+    if args.obj and buildings:
         write_obj(args.obj, buildings, roads)
 
 
