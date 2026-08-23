@@ -1,11 +1,11 @@
 using UnrealBuildTool;
 using System.Collections.Generic;
 
-public class HometownZeroEditorTarget : TargetRules
+public class HometownZeroTarget : TargetRules
 {
-	public HometownZeroEditorTarget(TargetInfo Target) : base(Target)
+	public HometownZeroTarget(TargetInfo Target) : base(Target)
 	{
-		Type = TargetType.Editor;
+		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.Latest;
 		ExtraModuleNames.Add("HometownZero");
 	}
