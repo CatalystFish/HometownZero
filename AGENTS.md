@@ -12,7 +12,8 @@ Unreal Engine 5 game repo root ("Hometown Zero": OSM-generated zombie survival).
 
 ## Rules
 
-- No `.uproject` exists yet — engine integration follows `Docs/phase0-spike-spec.md` phases until the spike passes go/no-go.
+- Engine lives at `E:\UE5\UE_5.8` (UE 5.8.1 launcher build). This folder is the git repo (branch `main`, LFS for `*.uasset`/`*.umap`); repo-local identity is placeholder until owner sets real GitHub credentials.
+- No `.uproject`-level build has happened yet: Visual Studio 2022 + "Game development with C++" workload is required before `-projectfiles` generation or any compile.
 - Runtime code targets UE5 C++/Blueprints. Asset-prep tooling must be performance-critical Python or C++, favoring offline/batch generation over runtime generation.
 - `district.json` schema `"version"` is a versioned contract between the Python pipeline and engine consumers — additive changes + version bump only.
 - The 13 building categories are shared vocabulary across classifier and loot tables — change both together.
