@@ -1,0 +1,29 @@
+# Unreal Engine generated/cache
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+Plugins/*/Build/
+
+# IDE
+.vs/
+.vscode/ipch/
+.idea/
+*.sln
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+*.suo
+*.user
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Python
+__pycache__/
+*.pyc
