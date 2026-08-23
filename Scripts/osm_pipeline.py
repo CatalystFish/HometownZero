@@ -463,7 +463,7 @@ def write_gltf(path, buildings, roads):
         for i in range(n):
             j = (i + 1) % n
             tris += [(i, j, n + j), (i, n + j, n + i)]
-        tris += [(n + a, n + c, n + bb)
+        tris += [(n + a, n + bb, n + c)
                  for a, bb, c in triangulate_ring(ring)]
         add_primitive(pts, tris,
                       CATEGORY_COLORS.get(b["category"],
