@@ -27,3 +27,6 @@ Desktop.ini
 # Python
 __pycache__/
 *.pyc
+
+# Local machine launchers (absolute engine paths)
+Launch HometownZero.bat
