@@ -34,6 +34,7 @@ AHDistrictManager::AHDistrictManager()
 	PrimaryActorTick.bCanEverTick = false;
 
 	DistrictRoot = CreateDefaultSubobject<USceneComponent>(TEXT("DistrictRoot"));
+	DistrictRoot->SetMobility(EComponentMobility::Static);
 	SetRootComponent(DistrictRoot);
 
 	DistrictJsonPath = TEXT("Scripts/samples/pike_place.json");
@@ -211,6 +212,7 @@ bool AHDistrictManager::ParseDistrictJson()
 		}
 		Box.Min -= FVector2D(1.f, 1.f);
 		Box.Max += FVector2D(1.f, 1.f);
+		Box.HeightM = Building.HeightM;
 		BuildingBoxes.Add(Box);
 	}
 	return true;
@@ -299,25 +301,25 @@ void AHDistrictManager::SpawnGround()
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	AStaticMeshActor* Ground = World->SpawnActor<AStaticMeshActor>(Params);
-	if (!Ground)
-	{
-		return;
-	}
-
-	Ground->SetMobility(EComponentMobility::Static);
-	UStaticMeshComponent* MeshComponent = Ground->GetStaticMeshComponent();
-	MeshComponent->SetStaticMesh(PlaneMesh);
-	MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
 	const FVector2D Center = DistrictBounds.bIsValid ? DistrictBounds.GetCenter() : FVector2D::ZeroVector;
 	const FVector2D Size = DistrictBounds.bIsValid
 		? DistrictBounds.GetSize() + FVector2D(NavMarginCm / 50.f, NavMarginCm / 50.f)
 		: FVector2D(2000.f, 2000.f);
-	// Engine plane is 100x100cm: scale to district size in cm, sit 2cm below street ribbons.
-	MeshComponent->SetWorldLocationAndRotation(
-		FVector(Center.X * 100.f, Center.Y * 100.f, -2.f), FRotator::ZeroRotator);
-	MeshComponent->SetWorldScale3D(FVector(Size.X * 100.f / 100.f, Size.Y * 100.f / 100.f, 1.f));
+	// Spawn directly at the target transform; a single plane stays Movable
+	// (one actor, zero perf cost) so we avoid static-mobility move errors.
+	AStaticMeshActor* Ground = World->SpawnActor<AStaticMeshActor>(
+		FVector(Center.X * 100.f, Center.Y * 100.f, -2.f), FRotator::ZeroRotator, Params);
+	if (!Ground)
+	{
+		return;
+	}
+
+	UStaticMeshComponent* MeshComponent = Ground->GetStaticMeshComponent();
+	MeshComponent->SetStaticMesh(PlaneMesh);
+	MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	// Engine plane is 100x100cm: scale to district size in cm.
+	MeshComponent->SetWorldScale3D(FVector(Size.X, Size.Y, 1.f));
 	if (GroundMaterial)
 	{
 		MeshComponent->SetMaterial(0, GroundMaterial);
@@ -465,11 +467,11 @@ void AHDistrictManager::LateStart()
 		return;
 	}
 
-	// Relocate the player to the validated street spawn (falls back to no-op
-	// if we could not find a good point).
+	// Relocate the player to the validated spawn point (rooftop or street).
 	if (bHasPlayerSpawn)
 	{
-		const FVector SpawnCm(PlayerSpawnPoint.X * 100.f, PlayerSpawnPoint.Y * 100.f, 120.f);
+		const float SpawnZCm = bRooftopSpawn ? PlayerSpawnHeightM * 100.f + 120.f : 120.f;
+		const FVector SpawnCm(PlayerSpawnPoint.X * 100.f, PlayerSpawnPoint.Y * 100.f, SpawnZCm);
 		if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(World, 0))
 		{
 			Pawn->SetActorLocation(SpawnCm);
@@ -477,8 +479,10 @@ void AHDistrictManager::LateStart()
 			{
 				Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
 			}
-			UE_LOG(LogTemp, Warning, TEXT("[H District] Player relocated to safe street spawn (%.0f, %.0f)"),
-				PlayerSpawnPoint.X, PlayerSpawnPoint.Y);
+			UE_LOG(LogTemp, Warning, TEXT("[H District] Player relocated to %s spawn (%.0f, %.0f, z=%.0fm)"),
+				bRooftopSpawn ? TEXT("ROOFTOP") : TEXT("street"),
+				PlayerSpawnPoint.X, PlayerSpawnPoint.Y,
+				bRooftopSpawn ? PlayerSpawnHeightM : 0.f);
 		}
 	}
 
@@ -510,13 +514,58 @@ bool AHDistrictManager::IsPointBlocked(const FVector2D& Point) const
 
 void AHDistrictManager::PickPlayerSpawn()
 {
+	// Preferred: rooftop of the tallest substantial building near the
+	// district center - an unmistakable "you can see everything" opening.
+	const FVector2D Center = DistrictBounds.bIsValid ? DistrictBounds.GetCenter() : FVector2D::ZeroVector;
+	float BestScore = 0.f;
+	bool bFoundRoof = false;
+	for (int32 Index = 0; Index < Buildings.Num(); ++Index)
+	{
+		const FBuildingData& Building = Buildings[Index];
+		const FBuildingBox& Box = BuildingBoxes[Index];
+		const float AreaM = (Box.Max.X - Box.Min.X) * (Box.Max.Y - Box.Min.Y);
+		if (AreaM < 400.f)
+		{
+			continue; // too small to land on comfortably
+		}
+		const float CenterDist = FVector2D::Distance(
+			(Building.Footprint.Num() > 0)
+				? Building.Footprint[0] : Center, Center);
+		if (CenterDist > 250.f)
+		{
+			continue; // keep the opening near the middle of the map
+		}
+		// Score: tall and central wins.
+		const float Score = Building.HeightM * 1000.f - CenterDist * 10.f;
+		if (Score > BestScore)
+		{
+			BestScore = Score;
+			FVector2D Centroid = FVector2D::ZeroVector;
+			for (const FVector2D& Point : Building.Footprint)
+			{
+				Centroid += Point;
+			}
+			Centroid /= static_cast<float>(Building.Footprint.Num());
+			PlayerSpawnPoint = Centroid;
+			PlayerSpawnHeightM = Building.HeightM;
+			bFoundRoof = true;
+		}
+	}
+
+	if (bFoundRoof)
+	{
+		bRooftopSpawn = true;
+		bHasPlayerSpawn = true;
+		UE_LOG(LogTemp, Warning, TEXT("[H District] Player rooftop spawn at (%.0f, %.0f), %.0fm up"),
+			PlayerSpawnPoint.X, PlayerSpawnPoint.Y, PlayerSpawnHeightM);
+		return;
+	}
+
+	// Fallback: open street vertex closest to the district center.
 	if (Roads.Num() == 0)
 	{
 		return;
 	}
-
-	// Open street vertex closest to the district center.
-	const FVector2D Center = DistrictBounds.bIsValid ? DistrictBounds.GetCenter() : FVector2D::ZeroVector;
 	float BestDistSq = TNumericLimits<float>::Max();
 	bool bFound = false;
 	for (const FRoadData& Road : Roads)

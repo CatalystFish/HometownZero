@@ -7,7 +7,7 @@ AHZNavBoundsVolume::AHZNavBoundsVolume()
 {
 	BoundsBox = CreateDefaultSubobject<UBoxComponent>(TEXT("NavBoundsBox"));
 	BoundsBox->SetCollisionProfileName(UCollisionProfile::NoCollision_ProfileName);
-	BoundsBox->Mobility = EComponentMobility::Static;
+	BoundsBox->Mobility = EComponentMobility::Movable;
 	// Replace the (empty at runtime) brush root so GetComponentsBoundingBox is real.
 	RootComponent = BoundsBox;
 }

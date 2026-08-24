@@ -79,6 +79,7 @@ private:
 	{
 		FVector2D Min;
 		FVector2D Max;
+		float HeightM = 0.f;
 	};
 
 	UMaterialInterface* FindCategoryMaterial(const FString& Category);
@@ -104,9 +105,11 @@ private:
 	/** Building AABBs with 1m margin, for spawn-point validation. */
 	TArray<FBuildingBox> BuildingBoxes;
 
-	/** Chosen open-street player spawn (local meters). */
+	/** Chosen open-street or rooftop player spawn (local meters). */
 	FVector2D PlayerSpawnPoint = FVector2D::ZeroVector;
+	float PlayerSpawnHeightM = 0.f;
 	bool bHasPlayerSpawn = false;
+	bool bRooftopSpawn = false;
 
 	int32 NumZombiesSpawned = 0;
 };
