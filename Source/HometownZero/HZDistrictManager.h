@@ -47,7 +47,9 @@ private:
 
 	bool ParseDistrictJson();
 
+	void SpawnGround();
 	void SpawnBuildings();
+	void SpawnRoads();
 	void SpawnNavigationBounds();
 	void SpawnZombies();
 

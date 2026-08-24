@@ -16,6 +16,8 @@ public:
 	AHZCharacter();
 
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual float TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
 
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Camera")
@@ -27,4 +29,9 @@ protected:
 private:
 	void MoveForward(float Value);
 	void MoveRight(float Value);
+	void SprintStart();
+	void SprintStop();
+	void Respawn();
+
+	float Health = 100.f;
 };

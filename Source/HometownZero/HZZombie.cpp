@@ -32,4 +32,9 @@ AHZZombie::AHZZombie()
 	BodyMesh->SetRelativeLocation(FVector(0.f, 0.f, -88.f + 45.f));
 	BodyMesh->SetRelativeScale3D(FVector(0.9f));
 	BodyMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	if (UMaterialInterface* ZombieMaterial = LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Game/HZMaterials/M_HZ_zombie.M_HZ_zombie")))
+	{
+		BodyMesh->SetMaterial(0, ZombieMaterial);
+	}
 }

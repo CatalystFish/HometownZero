@@ -4,6 +4,8 @@
 #include "AIController.h"
 #include "HZZombieAIController.generated.h"
 
+class AHZCharacter;
+
 /**
  * Throttled chase/wander brain: pursue the player within 8000cm, otherwise
  * wander within 2000cm of spawn.
@@ -21,8 +23,10 @@ public:
 
 private:
 	void UpdateBehavior();
+	void TryAttack(AHZCharacter* PlayerCharacter);
 
 	FVector SpawnLocation = FVector::ZeroVector;
 	float TimeSinceLastThink = 0.f;
+	float LastAttackTime = -10.f;
 	bool bHasWanderTarget = false;
 };

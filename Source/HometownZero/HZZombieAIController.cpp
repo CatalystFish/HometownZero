@@ -12,6 +12,9 @@ namespace
 	constexpr float ChaseRangeCm = 8000.f;
 	constexpr float WanderRadiusCm = 2000.f;
 	constexpr float ReachedWanderDistanceCm = 100.f;
+	constexpr float AttackRangeCm = 160.f;
+	constexpr float AttackCooldownSeconds = 0.6f;
+	constexpr float AttackDamage = 10.f;
 }
 
 AHZZombieAIController::AHZZombieAIController()
@@ -59,6 +62,7 @@ void AHZZombieAIController::UpdateBehavior()
 		if (DistanceSq <= FMath::Square(ChaseRangeCm))
 		{
 			bHasWanderTarget = false;
+			TryAttack(PlayerCharacter);
 			MoveToActor(PlayerCharacter, 120.f);
 			return;
 		}
@@ -75,4 +79,27 @@ void AHZZombieAIController::UpdateBehavior()
 		bHasWanderTarget =
 			MoveToLocation(Target, ReachedWanderDistanceCm) == EPathFollowingRequestResult::RequestSuccessful;
 	}
+}
+
+void AHZZombieAIController::TryAttack(AHZCharacter* PlayerCharacter)
+{
+	if (!GetPawn() || !PlayerCharacter)
+	{
+		return;
+	}
+
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now - LastAttackTime < AttackCooldownSeconds)
+	{
+		return;
+	}
+	if (FVector::DistSquared(GetPawn()->GetActorLocation(), PlayerCharacter->GetActorLocation())
+		> FMath::Square(AttackRangeCm))
+	{
+		return;
+	}
+
+	LastAttackTime = Now;
+	UGameplayStatics::ApplyDamage(PlayerCharacter, AttackDamage,
+		GetPawn()->GetController(), GetPawn(), nullptr);
 }

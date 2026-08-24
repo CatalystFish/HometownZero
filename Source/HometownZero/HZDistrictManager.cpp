@@ -2,6 +2,7 @@
 
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
 #include "HZNavBoundsVolume.h"
@@ -39,7 +40,9 @@ void AHDistrictManager::BeginPlay()
 		return;
 	}
 
+	SpawnGround();
 	SpawnBuildings();
+	SpawnRoads();
 	SpawnNavigationBounds();
 	SpawnZombies();
 }
@@ -238,6 +241,94 @@ void AHDistrictManager::SpawnBuildings()
 	(void)CategoryCounts; // kept minimal: counts are reported straight from the components above
 }
 
+void AHDistrictManager::SpawnGround()
+{
+	UWorld* World = GetWorld();
+	UStaticMesh* PlaneMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Plane.Plane"));
+	UMaterialInterface* GroundMaterial = LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Game/HZMaterials/M_HZ_ground.M_HZ_ground"));
+	if (!World || !PlaneMesh)
+	{
+		return;
+	}
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AStaticMeshActor* Ground = World->SpawnActor<AStaticMeshActor>(Params);
+	if (!Ground)
+	{
+		return;
+	}
+
+	Ground->SetMobility(EComponentMobility::Static);
+	UStaticMeshComponent* MeshComponent = Ground->GetStaticMeshComponent();
+	MeshComponent->SetStaticMesh(PlaneMesh);
+	MeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+	const FVector2D Center = DistrictBounds.bIsValid ? DistrictBounds.GetCenter() : FVector2D::ZeroVector;
+	const FVector2D Size = DistrictBounds.bIsValid
+		? DistrictBounds.GetSize() + FVector2D(NavMarginCm / 50.f, NavMarginCm / 50.f)
+		: FVector2D(2000.f, 2000.f);
+	// Engine plane is 100x100cm: scale to district size in cm, sit 2cm below street ribbons.
+	MeshComponent->SetWorldLocationAndRotation(
+		FVector(Center.X * 100.f, Center.Y * 100.f, -2.f), FRotator::ZeroRotator);
+	MeshComponent->SetWorldScale3D(FVector(Size.X * 100.f / 100.f, Size.Y * 100.f / 100.f, 1.f));
+	if (GroundMaterial)
+	{
+		MeshComponent->SetMaterial(0, GroundMaterial);
+	}
+	UE_LOG(LogTemp, Log, TEXT("[H District] Ground plane spawned at %s size %s"),
+		*Center.ToString(), *Size.ToString());
+}
+
+void AHDistrictManager::SpawnRoads()
+{
+	UWorld* World = GetWorld();
+	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
+	UMaterialInterface* RoadMaterial = LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Game/HZMaterials/M_HZ_road.M_HZ_road"));
+	if (!World || !CubeMesh || Roads.Num() == 0)
+	{
+		return;
+	}
+
+	UHierarchicalInstancedStaticMeshComponent* RoadInstances =
+		NewObject<UHierarchicalInstancedStaticMeshComponent>(this, TEXT("HISM_Roads"));
+	RoadInstances->SetupAttachment(GetRootComponent());
+	RoadInstances->SetMobility(EComponentMobility::Static);
+	RoadInstances->SetStaticMesh(CubeMesh);
+	RoadInstances->RegisterComponent();
+	if (RoadMaterial)
+	{
+		RoadInstances->SetMaterial(0, RoadMaterial);
+	}
+
+	int32 Segments = 0;
+	for (const FRoadData& Road : Roads)
+	{
+		for (int32 Index = 0; Index + 1 < Road.Polyline.Num(); ++Index)
+		{
+			const FVector2D& Start = Road.Polyline[Index];
+			const FVector2D& End = Road.Polyline[Index + 1];
+			const FVector2D Delta = End - Start;
+			const float LengthCm = FMath::Max(Delta.Size() * 100.f, 1.f);
+			const float WidthCm = FMath::Max(Road.WidthM * 100.f, 50.f);
+			const float YawRadians = FMath::Atan2(Delta.Y, Delta.X);
+
+			const FVector2D Mid = (Start + End) * 0.5f;
+			const FTransform InstanceTransform(
+				FRotator(0.f, FMath::RadiansToDegrees(YawRadians), 0.f),
+				FVector(Mid.X * 100.f, Mid.Y * 100.f, 1.f),
+				FVector(LengthCm / 100.f, WidthCm / 100.f, 0.1f));
+			RoadInstances->AddInstance(InstanceTransform, false);
+			++Segments;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d road segments across %d roads"),
+		Segments, Roads.Num());
+}
+
 void AHDistrictManager::SpawnNavigationBounds()
 {
 	UWorld* World = GetWorld();
@@ -306,6 +397,13 @@ void AHDistrictManager::SpawnZombies()
 
 UMaterialInterface* AHDistrictManager::FindCategoryMaterial(const FString& Category)
 {
+	// Deterministic generated materials first (Tools/generate_materials.py).
+	if (UMaterialInterface* Generated = LoadObject<UMaterialInterface>(
+		nullptr, *FString::Printf(TEXT("/Game/HZMaterials/M_HZ_%s.M_HZ_%s"), *Category, *Category)))
+	{
+		return Generated;
+	}
+
 	// Convention: one .uasset material per category under Content/Districts/<district>/...
 	static const FString SearchDirs[] = {
 		TEXT("Districts/pike_place/Materials"),
