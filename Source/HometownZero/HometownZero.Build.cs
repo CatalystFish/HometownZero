@@ -13,5 +13,13 @@ public class HometownZero : ModuleRules
 			"Engine",
 			"InputCore"
 		});
+
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"Json",
+			"JsonUtilities",
+			"AIModule",
+			"NavigationSystem"
+		});
 	}
 }

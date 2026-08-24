@@ -11,4 +11,6 @@ class HOMETOWNZERO_API AHZGameMode : public AGameModeBase
 
 public:
 	AHZGameMode();
+
+	virtual void BeginPlay() override;
 };

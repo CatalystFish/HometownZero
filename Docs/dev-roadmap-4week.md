@@ -15,22 +15,22 @@ A part-time solo plan (~3-4 hrs Mon–Fri, 4-6 hrs Sat/Sun) that takes the exist
 Get UE5.8 running under Git+LFS, pull Pike Place in through Interchange, and walk streets that physically hold you up.
 
 ### Week 1 · Mon
-- [ ] Verify UE 5.8 install; create blank C++ project `HometownZero`
-- [ ] `git init`, add `.gitignore` plus LFS tracks for `*.uasset` and `*.umap`; create remote; first commit and push
-- [ ] Build folder skeleton: `/Content/Districts`, `/Content/Player`, `/Content/AI`, `/Source`
+- [x] Verify UE 5.8 install; create blank C++ project `HometownZero`
+- [x] `git init`, add `.gitignore` plus LFS tracks for `*.uasset` and `*.umap`; create remote; first commit and push
+- [x] Build folder skeleton: `/Content/Districts`, `/Content/Player`, `/Content/AI`, `/Source`
 
 **Test:** clone the repo a second time locally and open it — zero LFS pointer-file errors, editor loads.
 
 ### Week 1 · Tue
-- [ ] Run `python osm_pipeline.py --bbox ... --out district.json --obj preview.obj` on the Pike Place bbox
-- [ ] Confirm `district.json` reports `"version": 2` and 219 buildings across the 13 categories
-- [ ] Import the OBJ through Interchange into `/Content/Districts`
+- [x] Run `python osm_pipeline.py --bbox ... --out district.json --obj preview.obj` on the Pike Place bbox
+- [x] Confirm `district.json` reports `"version": 2` and 219 buildings across the 13 categories
+- [x] Import the OBJ through Interchange into `/Content/Districts`
 
 **Test:** actor/mesh count in the level equals the building count printed by the pipeline (219).
 
 ### Week 1 · Wed
-- [ ] Enable auto-generated BOX/CONVEX collision on every extruded building prism; grep-import settings to confirm no complex-as-simple trimeshes remain
-- [ ] Add a basic player pawn with movement and a camera
+- [x] Enable auto-generated BOX/CONVEX collision on every extruded building prism; grep-import settings to confirm no complex-as-simple trimeshes remain
+- [x] Add a basic player pawn with movement and a camera
 - [ ] Walk the street grid end to end
 
 **Test:** cross the full district without falling through any surface; every building wall blocks the capsule.

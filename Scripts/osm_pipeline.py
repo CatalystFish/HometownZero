@@ -56,6 +56,19 @@ JUNK_AMENITIES = {
     "parking_space", "parking_entrance", "fountain", "grit_bin", "clock",
     "shelter", "loading_dock",
 }
+AREA_POI_KEYS = ("shop", "amenity", "craft", "office",
+                 "tourism", "leisure", "healthcare")
+JUNK_LEISURE_AREAS = {"track", "pitch", "playground", "park", "garden",
+                      "recreation_ground", "nature_reserve", "dog_park",
+                      "swimming_pool"}
+JUNK_TOURISM_AREAS = {"artwork", "attraction"}
+
+
+def is_junk_area(tags):
+    if JUNK_AMENITIES.intersection(tags.values()):
+        return True
+    return (tags.get("leisure") in JUNK_LEISURE_AREAS
+            or tags.get("tourism") in JUNK_TOURISM_AREAS)
 
 
 def fetch_overpass(bbox, timeout=90):
@@ -69,6 +82,13 @@ def fetch_overpass(bbox, timeout=90):
         f'node["office"]({bbox});'
         f'node["healthcare"]({bbox});'
         f'node["craft"]({bbox});'
+        f'way["shop"]({bbox});'
+        f'way["amenity"]({bbox});'
+        f'way["craft"]({bbox});'
+        f'way["office"]({bbox});'
+        f'way["tourism"]({bbox});'
+        f'way["leisure"]({bbox});'
+        f'way["healthcare"]({bbox});'
         ");out geom;"
     )
     payload = urllib.parse.urlencode({"data": query}).encode()
@@ -78,7 +98,7 @@ def fetch_overpass(bbox, timeout=90):
             print(f"[fetch] {endpoint} ...")
             req = urllib.request.Request(endpoint, data=payload, headers={
                 "Content-Type": "application/x-www-form-urlencoded",
-                "User-Agent": "HometownZero-Phase0-Spike/0.1",
+                "User-Agent": "HometownZero-Phase0-Spike/0.5",
             })
             with urllib.request.urlopen(req, timeout=timeout + 30) as resp:
                 data = json.load(resp)
@@ -129,6 +149,17 @@ def classify(tags):
         return "retail"
     if building in RESIDENTIAL_BUILDINGS:
         return "residential"
+    tourism = tags.get("tourism")
+    if tourism in ("hotel", "motel", "hostel", "guest_house"):
+        return "residential"
+    if tourism in ("museum", "gallery", "aquarium"):
+        return "civic"
+    if tags.get("amenity") in ("cinema", "theatre", "community_centre",
+                               "conference_centre", "events_venue"):
+        return "civic"
+    if tags.get("leisure") in ("fitness_centre", "sports_centre",
+                               "sports_hall", "stadium"):
+        return "weapons_outdoors"
     return "unknown"
 
 
@@ -174,6 +205,7 @@ def to_local(lon, lat, lat0, lon0, m_per_deg_lon):
 def process(elements, bbox):
     lat0, lon0, m_per_deg_lon = project_origin(bbox)
     buildings, roads, pois, skipped = [], [], [], 0
+    area_pois = 0
 
     for el in elements:
         etype = el.get("type")
@@ -194,6 +226,10 @@ def process(elements, bbox):
             continue
         coords = [(p["lon"], p["lat"]) for p in el["geometry"]
                   if p.get("lon") is not None and p.get("lat") is not None]
+
+        if "highway" not in tags and "building" not in tags \
+                and is_junk_area(tags):
+            continue
 
         if "building" in tags or any(
                 k in tags for k in ("amenity", "shop")):
@@ -229,8 +265,16 @@ def process(elements, bbox):
                 "polyline": [to_local(lon, lat, lat0, lon0, m_per_deg_lon)
                              for lon, lat in coords],
             })
+        elif any(k in tags for k in AREA_POI_KEYS) \
+                and len(coords) >= 4 and coords[0] == coords[-1]:
+            ring = [to_local(lon, lat, lat0, lon0, m_per_deg_lon)
+                    for lon, lat in coords[:-1]]
+            if abs(polygon_area(ring)) >= 9.0:
+                cx, cy = polygon_centroid(ring)
+                pois.append((cx, cy, tags))
+                area_pois += 1
 
-    return buildings, roads, pois, skipped
+    return buildings, roads, pois, skipped, area_pois
 
 
 def polygon_area(pts):
@@ -241,6 +285,21 @@ def polygon_area(pts):
         x2, y2 = pts[(i + 1) % n]
         total += x1 * y2 - x2 * y1
     return total / 2.0
+
+
+def polygon_centroid(pts):
+    cx = cy = a = 0.0
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        cross = x1 * y2 - x2 * y1
+        a += cross
+        cx += (x1 + x2) * cross
+        cy += (y1 + y2) * cross
+    if abs(a) < 1e-12:
+        return (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n)
+    return (cx / (3.0 * a), cy / (3.0 * a))
 
 
 def point_in_ring(x, y, ring):
@@ -545,12 +604,13 @@ def main():
             raise SystemExit("bbox must be four comma-separated numbers: "
                              "minlat,minlon,maxlat,maxlon")
         elements = fetch_overpass(args.bbox)["elements"]
-        buildings, roads, pois, skipped = process(elements, bbox)
+        buildings, roads, pois, skipped, area_pois = process(elements, bbox)
         if not buildings:
             raise SystemExit("No buildings found in bbox — check coordinates.")
         resolved, matched = join_pois(buildings, pois)
         print(f"[join ] {matched}/{len(pois)} POI nodes fell inside footprints; "
               f"{resolved} 'unknown' buildings re-classified")
+        print(f"[area ] {area_pois} area-POI ways converted to join candidates")
         write_json(args.out, bbox, buildings, roads, skipped)
 
     if args.gltf and buildings:
