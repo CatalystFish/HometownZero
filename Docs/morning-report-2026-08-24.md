@@ -44,3 +44,15 @@
 
 1. Your Play test verdict (above)
 2. Then Week 1 · Thu proper: draw-call before/after numbers for the HISM city, and the first loot container prototype (hospital → meds) using `LootSource{category}`.
+
+## Addendum - second cooking block (later same night)
+
+The game grew a full core loop while you slept. Added on top of the runtime city:
+
+- **Combat**: Left-click melee (34 dmg, 3 hits kills a zombie), zombies deal 10 dmg/0.6s in melee range, you have 100 HP + health bar, death respawns you at PlayerStart.
+- **Loot**: 229 searchable containers at building corners (E to search when close, HUD prompt appears) -> rolls the category loot table -> spawns colored pickups you walk over -> bag counter increments. The 13 tables are in HZLootContainer.cpp; headless-verified (medical -> Bandage/Painkillers/Antibiotics/SurgicalKit).
+- **Hordes**: +2 zombies every 60 seconds, cap 40. Surviving longer = more pressure.
+
+Controls now: WASD move | mouse look | Space jump | Shift sprint | LMB attack | E search.
+
+Updated test flow: spawn -> walk to any building corner -> E -> grab drops -> fight the first zombie that finds you -> survive long enough to see a horde wave log line. The full GDD core loop (scavenge -> fight -> loot) exists in greybox form.

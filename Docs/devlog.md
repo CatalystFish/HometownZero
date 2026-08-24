@@ -28,3 +28,11 @@ Per the roadmap's daily shutdown ritual: what moved, what broke, how fixed, tomo
 - Depth pass: ground plane, road ribbons, player health/sprint (Shift)/death-respawn, zombie contact damage (10 per 0.6s within 160cm).
 - Pipeline v0.6: area-POI dedupe (centroid-in-building = same structure twice). Multi-city samples: Portland 314 bldgs/66% classified (best launch candidate), Austin 437/31%.
 - Tomorrow first task: human Play test of the runtime city + zombie chase (Docs/thursday-brief.md).
+
+## 2026-08-24 (second cooking block)
+- Gameplay layer: E-to-search loot containers at building corners (229 spawned), 13 weighted category loot tables, walk-over pickups, inventory component (log-based).
+- Combat: player melee (LMB, 34 dmg, 0.5s cooldown, sphere sweep) vs zombie 100 HP -> destroy on kill; zombie contact 10 dmg/0.6s; death -> respawn at PlayerStart.
+- HUD: health bar, bag count, contextual [E] Search prompt (first rendering code - unverified visually until human Play).
+- Horde escalation: +2 zombies every 60s, cap 40 - headless-verified across 2.5min run (10 -> 12 -> 14).
+- Loot tables headless-verified in-game via exec command HZDumpLoot (medical rolls correct; unknown-fallback proven with garbage category).
+- ExecCmds pipe separator does not split commands - single command per run only (noted for future headless tests).

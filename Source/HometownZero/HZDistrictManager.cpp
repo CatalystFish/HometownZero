@@ -20,6 +20,9 @@ namespace
 	constexpr int32 ExpectedSchemaVersion = 2;
 	constexpr int32 ZombieCount = 10;
 	constexpr float NavMarginCm = 500.f;
+	constexpr float HordeWaveIntervalSeconds = 60.f;
+	constexpr int32 HordeWaveSize = 2;
+	constexpr int32 MaxZombies = 40;
 }
 
 AHDistrictManager::AHDistrictManager()
@@ -430,13 +433,49 @@ void AHDistrictManager::SpawnNavigationBounds()
 
 void AHDistrictManager::SpawnZombies()
 {
+	NumZombiesSpawned += SpawnZombiesAtRoads(ZombieCount);
+	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d/%d zombies at random road vertices"),
+		NumZombiesSpawned, ZombieCount);
+
+	// Session arc: the dead trickle in over time.
+	GetWorldTimerManager().SetTimer(HordeWaveTimer, this,
+		&AHDistrictManager::SpawnZombieWave, HordeWaveIntervalSeconds, true);
+}
+
+void AHDistrictManager::SpawnZombieWave()
+{
 	UWorld* World = GetWorld();
-	if (!World || Roads.Num() == 0)
+	if (!World)
 	{
 		return;
 	}
+	// Only count living zombies for the cap.
+	int32 LivingZombies = 0;
+	for (TActorIterator<AHZZombie> It(World); It; ++It)
+	{
+		++LivingZombies;
+	}
+	const int32 ToSpawn = FMath::Min(HordeWaveSize, MaxZombies - LivingZombies);
+	if (ToSpawn <= 0)
+	{
+		return;
+	}
+	const int32 Spawned = SpawnZombiesAtRoads(ToSpawn);
+	NumZombiesSpawned += Spawned;
+	UE_LOG(LogTemp, Warning, TEXT("[H District] Horde wave: +%d zombies (living %d, spawned total %d)"),
+		Spawned, LivingZombies + Spawned, NumZombiesSpawned);
+}
 
-	for (int32 Index = 0; Index < ZombieCount; ++Index)
+int32 AHDistrictManager::SpawnZombiesAtRoads(int32 Count)
+{
+	UWorld* World = GetWorld();
+	if (!World || Roads.Num() == 0)
+	{
+		return 0;
+	}
+
+	int32 Spawned = 0;
+	for (int32 Index = 0; Index < Count; ++Index)
 	{
 		const FRoadData& Road = Roads[FMath::RandRange(0, Roads.Num() - 1)];
 		if (Road.Polyline.Num() == 0)
@@ -454,12 +493,10 @@ void AHDistrictManager::SpawnZombies()
 			Params);
 		if (Zombie)
 		{
-			++NumZombiesSpawned;
+			++Spawned;
 		}
 	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d/%d zombies at random road vertices"),
-		NumZombiesSpawned, ZombieCount);
+	return Spawned;
 }
 
 UMaterialInterface* AHDistrictManager::FindCategoryMaterial(const FString& Category)

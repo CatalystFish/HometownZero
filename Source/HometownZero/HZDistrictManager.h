@@ -59,6 +59,10 @@ private:
 	void SpawnLootContainers();
 	void SpawnNavigationBounds();
 	void SpawnZombies();
+	void SpawnZombieWave();
+
+	/** Spawns ZombieWaveSize zombies at random road vertices; returns spawned count. */
+	int32 SpawnZombiesAtRoads(int32 Count);
 
 	UMaterialInterface* FindCategoryMaterial(const FString& Category);
 
@@ -76,6 +80,8 @@ private:
 
 	/** Searchable loot containers, one per suitably-sized building. */
 	TArray<TObjectPtr<AHZLootContainer>> Containers;
+
+	FTimerHandle HordeWaveTimer;
 
 	int32 NumZombiesSpawned = 0;
 };
