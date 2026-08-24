@@ -19,7 +19,8 @@ public class HometownZero : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"AIModule",
-			"NavigationSystem"
+			"NavigationSystem",
+			"ProceduralMeshComponent"
 		});
 	}
 }

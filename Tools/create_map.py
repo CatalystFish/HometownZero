@@ -12,7 +12,7 @@ def spawn(cls, loc, rot=(0, 0, 0)):
     system = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     location = unreal.Vector(*loc)
     rotation = unreal.Rotator(roll=rot[0], pitch=rot[1], yaw=rot[2])
-    return system.spawn_actor_from_object(cls, location, rotation)
+    return system.spawn_actor_from_class(cls, location, rotation)
 
 
 def main():

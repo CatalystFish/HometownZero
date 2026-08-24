@@ -1,10 +1,12 @@
 #include "HZDistrictManager.h"
 
+#include "Components/BoxComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
 #include "Engine/World.h"
+#include "GeomTools.h"
 #include "HAL/FileManager.h"
 #include "HZLootContainer.h"
 #include "HZNavBoundsVolume.h"
@@ -13,6 +15,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "NavigationSystem.h"
+#include "ProceduralMeshComponent.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -221,71 +224,115 @@ bool AHDistrictManager::ParseDistrictJson()
 void AHDistrictManager::SpawnBuildings()
 {
 	UWorld* World = GetWorld();
-	UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (!World || !CubeMesh)
+	if (!World || Buildings.Num() == 0)
 	{
-		UE_LOG(LogTemp, Error, TEXT("[H District] Missing world or engine cube mesh - no buildings spawned"));
 		return;
 	}
 
-	TMap<FString, int32> CategoryCounts;
-
+	int32 Spawned = 0;
 	for (const FBuildingData& Building : Buildings)
 	{
-		TObjectPtr<UHierarchicalInstancedStaticMeshComponent>& Instances =
-			CategoryInstances.FindOrAdd(Building.Category);
-		if (!Instances)
+		if (Building.Footprint.Num() < 3)
 		{
-			UHierarchicalInstancedStaticMeshComponent* Component =
-				NewObject<UHierarchicalInstancedStaticMeshComponent>(
-					this, FName(*FString::Printf(TEXT("HISM_%s"), *Building.Category)));
-			Component->SetupAttachment(GetRootComponent());
-			Component->SetMobility(EComponentMobility::Static);
-			Component->SetStaticMesh(CubeMesh);
-			Component->RegisterComponent();
-
-			if (UMaterialInterface* Material = FindCategoryMaterial(Building.Category))
-			{
-				Component->SetMaterial(0, Material);
-			}
-			Instances = Component;
+			continue;
 		}
 
+		const float HeightCm = FMath::Max(Building.HeightM * 100.f, 1.f);
+		const int32 N = Building.Footprint.Num();
+
+		TArray<FVector2D> Ring2D;
+		Ring2D.Reserve(N);
+		FVector2D Centroid = FVector2D::ZeroVector;
 		FVector2D Min(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
 		FVector2D Max(TNumericLimits<float>::Lowest(), TNumericLimits<float>::Lowest());
-		FVector2D Sum = FVector2D::ZeroVector;
 		for (const FVector2D& Point : Building.Footprint)
 		{
+			Ring2D.Add(Point);
+			Centroid += Point;
 			Min = Min.ComponentMin(Point);
 			Max = Max.ComponentMax(Point);
-			Sum += Point;
 		}
-		const FVector2D Centroid = Sum / static_cast<float>(Building.Footprint.Num());
+		Centroid /= static_cast<float>(N);
 
-		const float WidthCm = FMath::Max((Max.X - Min.X) * 100.f, 1.f);
-		const float DepthCm = FMath::Max((Max.Y - Min.Y) * 100.f, 1.f);
-		const float HeightCm = FMath::Max(Building.HeightM * 100.f, 1.f);
+		// Roof triangulation: flat list of vertex POSITIONS, 3 per triangle.
+		// Footprints are CCW (pipeline reverses to positive shoelace area),
+		// which is exactly what FGeomTools2D expects.
+		TArray<FVector2D> RoofTris2D;
+		if (!FGeomTools2D::TriangulatePoly(RoofTris2D, Ring2D))
+		{
+			continue; // degenerate footprint, skip
+		}
 
-		// Engine cube is a centered 100cm box: scale to footprint size and lift by half height so it rests on z=0.
-		const FTransform InstanceTransform(FRotator::ZeroRotator,
-			FVector(Centroid.X * 100.f, Centroid.Y * 100.f, HeightCm * 0.5f),
-			FVector(WidthCm / 100.f, DepthCm / 100.f, HeightCm / 100.f));
+		TArray<FVector> Vertices;
+		TArray<int32> Indices;
+		TArray<FVector> Normals;
 
-		Instances->AddInstance(InstanceTransform, false);
-		CategoryCounts.FindOrAdd(Building.Category) += 1;
+		// Emit one triangle (both windings, same outward normal) so faces are
+		// visible regardless of winding and light correctly.
+		auto EmitTriNormal = [&](const FVector& A, const FVector& B, const FVector& C, const FVector& Normal)
+		{
+			const int32 Base = Vertices.Num();
+			Vertices.Add(A); Vertices.Add(B); Vertices.Add(C);
+			Normals.Add(Normal); Normals.Add(Normal); Normals.Add(Normal);
+			Indices.Add(Base); Indices.Add(Base + 1); Indices.Add(Base + 2);
+			Indices.Add(Base); Indices.Add(Base + 2); Indices.Add(Base + 1);
+		};
+
+		// Walls: outward horizontal normal = (dy, -dx) for a CCW ring.
+		for (int32 i = 0; i < N; ++i)
+		{
+			const int32 j = (i + 1) % N;
+			const FVector2D P0 = Ring2D[i];
+			const FVector2D P1 = Ring2D[j];
+			const FVector2D Edge = P1 - P0;
+			const FVector WallNormal(Edge.Y, -Edge.X, 0.f);
+			const FVector N2 = WallNormal.GetSafeNormal();
+
+			const FVector A(P0.X * 100.f, P0.Y * 100.f, 0.f);
+			const FVector B(P1.X * 100.f, P1.Y * 100.f, 0.f);
+			const FVector C(P1.X * 100.f, P1.Y * 100.f, HeightCm);
+			const FVector D(P0.X * 100.f, P0.Y * 100.f, HeightCm);
+			EmitTriNormal(A, B, C, N2);
+			EmitTriNormal(A, C, D, N2);
+		}
+
+		// Roof.
+		for (int32 t = 0; t + 2 < RoofTris2D.Num(); t += 3)
+		{
+			const FVector A(RoofTris2D[t].X * 100.f, RoofTris2D[t].Y * 100.f, HeightCm);
+			const FVector B(RoofTris2D[t + 1].X * 100.f, RoofTris2D[t + 1].Y * 100.f, HeightCm);
+			const FVector C(RoofTris2D[t + 2].X * 100.f, RoofTris2D[t + 2].Y * 100.f, HeightCm);
+			EmitTriNormal(A, B, C, FVector::UpVector);
+		}
+
+		// Visual mesh.
+		UProceduralMeshComponent* Mesh = NewObject<UProceduralMeshComponent>(this);
+		Mesh->SetupAttachment(GetRootComponent());
+		Mesh->SetMobility(EComponentMobility::Static);
+		Mesh->CreateMeshSection(0, Vertices, Indices, Normals,
+			TArray<FVector2D>(), TArray<FColor>(), TArray<FProcMeshTangent>(), false);
+		if (UMaterialInterface* Material = FindCategoryMaterial(Building.Category))
+		{
+			Mesh->SetMaterial(0, Material);
+		}
+		Mesh->RegisterComponent();
+
+		// Cheap box collision per prism (spec: box/convex, not complex-as-simple).
+		UBoxComponent* Collision = NewObject<UBoxComponent>(this);
+		Collision->SetupAttachment(GetRootComponent());
+		Collision->SetMobility(EComponentMobility::Static);
+		Collision->SetBoxExtent(FVector(
+			FMath::Max((Max.X - Min.X) * 100.f * 0.5f, 1.f),
+			FMath::Max((Max.Y - Min.Y) * 100.f * 0.5f, 1.f),
+			HeightCm * 0.5f));
+		Collision->SetRelativeLocation(FVector(Centroid.X * 100.f, Centroid.Y * 100.f, HeightCm * 0.5f));
+		Collision->SetCollisionProfileName(TEXT("BlockAll"));
+		Collision->RegisterComponent();
+
+		++Spawned;
 	}
 
-	int32 TotalInstances = 0;
-	for (const TPair<FString, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>>& Pair : CategoryInstances)
-	{
-		const int32 Count = Pair.Value != nullptr ? Pair.Value->GetInstanceCount() : 0;
-		TotalInstances += Count;
-		UE_LOG(LogTemp, Warning, TEXT("[H District] Category '%s': %d instances"), *Pair.Key, Count);
-	}
-	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d buildings across %d categories (%d instances total)"),
-		Buildings.Num(), CategoryInstances.Num(), TotalInstances);
-
-	(void)CategoryCounts; // kept minimal: counts are reported straight from the components above
+	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d building prisms (real footprints)"), Spawned);
 }
 
 void AHDistrictManager::SpawnGround()

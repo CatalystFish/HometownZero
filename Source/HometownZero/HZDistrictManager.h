@@ -93,9 +93,6 @@ private:
 	/** District bounds in local meters (east/north), from buildings + roads. */
 	FBox2D DistrictBounds;
 
-	/** Category name -> instanced mesh component. */
-	TMap<FString, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CategoryInstances;
-
 	/** Searchable loot containers, one per suitably-sized building. */
 	TArray<TObjectPtr<AHZLootContainer>> Containers;
 
