@@ -20,6 +20,7 @@ AHZZombie::AHZZombie()
 	bUseControllerRotationYaw = false;
 
 	AIControllerClass = AHZZombieAIController::StaticClass();
+	AutoPossessAI = EAutoPossessAI::Spawned;
 
 	// Visible placeholder body: engine cube (100cm) scaled to ~90cm, resting on
 	// the capsule bottom. The default skeletal mesh is never set, so nothing to hide.

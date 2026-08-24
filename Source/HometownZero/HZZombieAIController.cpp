@@ -55,6 +55,15 @@ void AHZZombieAIController::UpdateBehavior()
 		return;
 	}
 
+	// Periodic movement probe: proves zombies are alive in headless runs.
+	static int32 ThinkCounter = 0;
+	if (++ThinkCounter % 20 == 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[HZ Zombie] probe %s at %s status %d"),
+			*ControlledPawn->GetName(), *ControlledPawn->GetActorLocation().ToCompactString(),
+			static_cast<int32>(GetMoveStatus()));
+	}
+
 	AHZCharacter* PlayerCharacter = Cast<AHZCharacter>(UGameplayStatics::GetPlayerCharacter(GetWorld(), 0));
 	if (PlayerCharacter)
 	{
