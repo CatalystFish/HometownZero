@@ -3,8 +3,10 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
+#include "EngineUtils.h"
 #include "Engine/World.h"
 #include "HAL/FileManager.h"
+#include "HZLootContainer.h"
 #include "HZNavBoundsVolume.h"
 #include "HZZombie.h"
 #include "Materials/MaterialInterface.h"
@@ -43,8 +45,22 @@ void AHDistrictManager::BeginPlay()
 	SpawnGround();
 	SpawnBuildings();
 	SpawnRoads();
+	SpawnLootContainers();
 	SpawnNavigationBounds();
 	SpawnZombies();
+}
+
+AHDistrictManager* AHDistrictManager::Get(const UWorld* World)
+{
+	if (!World)
+	{
+		return nullptr;
+	}
+	for (TActorIterator<AHDistrictManager> It(World); It; ++It)
+	{
+		return *It;
+	}
+	return nullptr;
 }
 
 bool AHDistrictManager::ParseDistrictJson()
@@ -327,6 +343,57 @@ void AHDistrictManager::SpawnRoads()
 
 	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d road segments across %d roads"),
 		Segments, Roads.Num());
+}
+
+void AHDistrictManager::SpawnLootContainers()
+{
+	UWorld* World = GetWorld();
+	if (!World || Buildings.Num() == 0)
+	{
+		return;
+	}
+
+	for (const FBuildingData& Building : Buildings)
+	{
+		if (Building.Footprint.Num() < 3)
+		{
+			continue;
+		}
+
+		// Only buildings big enough to bother searching.
+		float Area = 0.f;
+		FVector2D Centroid = FVector2D::ZeroVector;
+		for (int32 Index = 0; Index < Building.Footprint.Num(); ++Index)
+		{
+			const FVector2D& A = Building.Footprint[Index];
+			const FVector2D& B = Building.Footprint[(Index + 1) % Building.Footprint.Num()];
+			Area += A.X * B.Y - B.X * A.Y;
+			Centroid += A;
+		}
+		Centroid /= static_cast<float>(Building.Footprint.Num());
+		if (FMath::Abs(Area) * 0.5f < 30.f)
+		{
+			continue;
+		}
+
+		// Drop the container at a footprint corner, nudged outward so it sits
+		// on the street side of the wall (buildings are solid in the spike).
+		const FVector2D& Corner = Building.Footprint[0];
+		const FVector2D Outward = (Corner - Centroid).GetSafeNormal();
+		const FVector Location((Corner.X + Outward.X * 1.5f) * 100.f,
+			(Corner.Y + Outward.Y * 1.5f) * 100.f, 40.f);
+
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		AHZLootContainer* Container = World->SpawnActor<AHZLootContainer>(Location, FRotator::ZeroRotator, Params);
+		if (Container)
+		{
+			Container->Category = Building.Category;
+			Containers.Add(Container);
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d loot containers"), Containers.Num());
 }
 
 void AHDistrictManager::SpawnNavigationBounds()

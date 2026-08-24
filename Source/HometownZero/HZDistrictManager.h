@@ -6,12 +6,13 @@
 
 class USceneComponent;
 class UHierarchicalInstancedStaticMeshComponent;
+class AHZLootContainer;
 
 /**
  * Path B runtime district loader: reads a district.json produced by
  * Scripts/osm_pipeline.py (schema version 2 contract) and spawns one
  * HierarchicalInstancedStaticMesh cube per building footprint, grouped by
- * category. Also seeds navigation bounds and zombies for the spike.
+ * category. Also seeds navigation bounds, loot containers and zombies.
  */
 UCLASS()
 class HOMETOWNZERO_API AHDistrictManager : public AActor
@@ -20,6 +21,11 @@ class HOMETOWNZERO_API AHDistrictManager : public AActor
 
 public:
 	AHDistrictManager();
+
+	/** Convenience accessor for the one manager in the world. */
+	static AHDistrictManager* Get(const UWorld* World);
+
+	const TArray<TObjectPtr<AHZLootContainer>>& GetContainers() const { return Containers; }
 
 protected:
 	virtual void BeginPlay() override;
@@ -50,6 +56,7 @@ private:
 	void SpawnGround();
 	void SpawnBuildings();
 	void SpawnRoads();
+	void SpawnLootContainers();
 	void SpawnNavigationBounds();
 	void SpawnZombies();
 
@@ -66,6 +73,9 @@ private:
 
 	/** Category name -> instanced mesh component. */
 	TMap<FString, TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> CategoryInstances;
+
+	/** Searchable loot containers, one per suitably-sized building. */
+	TArray<TObjectPtr<AHZLootContainer>> Containers;
 
 	int32 NumZombiesSpawned = 0;
 };

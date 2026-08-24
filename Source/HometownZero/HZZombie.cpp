@@ -5,6 +5,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "HZZombieAIController.h"
+#include "Materials/MaterialInterface.h"
 
 AHZZombie::AHZZombie()
 {
@@ -37,4 +38,17 @@ AHZZombie::AHZZombie()
 	{
 		BodyMesh->SetMaterial(0, ZombieMaterial);
 	}
+}
+
+float AHZZombie::TakeDamage(float DamageAmount, const FDamageEvent& DamageEvent,
+	AController* EventInstigator, AActor* DamageCauser)
+{
+	const float Actual = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+	Health -= Actual;
+	if (Health <= 0.f)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[HZ Zombie] destroyed after %.0f total damage"), Actual);
+		Destroy();
+	}
+	return Actual;
 }

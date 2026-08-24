@@ -18,7 +18,12 @@ class HOMETOWNZERO_API AHZZombie : public ACharacter
 public:
 	AHZZombie();
 
+	virtual float TakeDamage(float DamageAmount, const struct FDamageEvent& DamageEvent,
+		AController* EventInstigator, AActor* DamageCauser) override;
+
 private:
 	UPROPERTY(VisibleAnywhere, Category = "Zombie")
 	TObjectPtr<UStaticMeshComponent> BodyMesh;
+
+	float Health = 100.f;
 };
