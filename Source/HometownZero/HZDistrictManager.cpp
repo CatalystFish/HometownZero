@@ -9,11 +9,15 @@
 #include "HZLootContainer.h"
 #include "HZNavBoundsVolume.h"
 #include "HZZombie.h"
+#include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "NavigationSystem.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
+
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 namespace
 {
@@ -50,7 +54,12 @@ void AHDistrictManager::BeginPlay()
 	SpawnRoads();
 	SpawnLootContainers();
 	SpawnNavigationBounds();
-	SpawnZombies();
+	PickPlayerSpawn();
+
+	// Delayed setup: let the world (and navmesh) settle, then relocate the
+	// player to a validated street point and seed zombies around them.
+	GetWorldTimerManager().SetTimer(LateStartTimer, this,
+		&AHDistrictManager::LateStart, 0.5f, false);
 }
 
 AHDistrictManager* AHDistrictManager::Get(const UWorld* World)
@@ -187,6 +196,23 @@ bool AHDistrictManager::ParseDistrictJson()
 	UE_LOG(LogTemp, Log, TEXT("[H District] Parsed %s: version=%.0f buildings=%d roads=%d bounds=%s"),
 		*FullPath, Version, Buildings.Num(), Roads.Num(),
 		DistrictBounds.bIsValid ? *DistrictBounds.ToString() : TEXT("invalid"));
+
+	// Precompute building AABBs (+1m margin) for spawn validation.
+	BuildingBoxes.Reset();
+	for (const FBuildingData& Building : Buildings)
+	{
+		FBuildingBox Box;
+		Box.Min = FVector2D(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+		Box.Max = FVector2D(TNumericLimits<float>::Lowest(), TNumericLimits<float>::Lowest());
+		for (const FVector2D& Point : Building.Footprint)
+		{
+			Box.Min = Box.Min.ComponentMin(Point);
+			Box.Max = Box.Max.ComponentMax(Point);
+		}
+		Box.Min -= FVector2D(1.f, 1.f);
+		Box.Max += FVector2D(1.f, 1.f);
+		BuildingBoxes.Add(Box);
+	}
 	return true;
 }
 
@@ -431,15 +457,89 @@ void AHDistrictManager::SpawnNavigationBounds()
 	}
 }
 
-void AHDistrictManager::SpawnZombies()
+void AHDistrictManager::LateStart()
 {
-	NumZombiesSpawned += SpawnZombiesAtRoads(ZombieCount);
-	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d/%d zombies at random road vertices"),
-		NumZombiesSpawned, ZombieCount);
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	// Relocate the player to the validated street spawn (falls back to no-op
+	// if we could not find a good point).
+	if (bHasPlayerSpawn)
+	{
+		const FVector SpawnCm(PlayerSpawnPoint.X * 100.f, PlayerSpawnPoint.Y * 100.f, 120.f);
+		if (APawn* Pawn = UGameplayStatics::GetPlayerPawn(World, 0))
+		{
+			Pawn->SetActorLocation(SpawnCm);
+			if (ACharacter* Character = Cast<ACharacter>(Pawn))
+			{
+				Character->GetCharacterMovement()->Velocity = FVector::ZeroVector;
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[H District] Player relocated to safe street spawn (%.0f, %.0f)"),
+				PlayerSpawnPoint.X, PlayerSpawnPoint.Y);
+		}
+	}
+
+	// Initial horde seeds around the player so the threat is visible fast.
+	const int32 Spawned = bHasPlayerSpawn
+		? SpawnZombiesNear(PlayerSpawnPoint, 15.f, 80.f, ZombieCount)
+		: SpawnZombiesAtRoads(ZombieCount);
+	NumZombiesSpawned += Spawned;
+	UE_LOG(LogTemp, Warning, TEXT("[H District] Spawned %d/%d zombies near the player"),
+		Spawned, ZombieCount);
 
 	// Session arc: the dead trickle in over time.
 	GetWorldTimerManager().SetTimer(HordeWaveTimer, this,
 		&AHDistrictManager::SpawnZombieWave, HordeWaveIntervalSeconds, true);
+}
+
+bool AHDistrictManager::IsPointBlocked(const FVector2D& Point) const
+{
+	for (const FBuildingBox& Box : BuildingBoxes)
+	{
+		if (Box.Min.X <= Point.X && Point.X <= Box.Max.X &&
+			Box.Min.Y <= Point.Y && Point.Y <= Box.Max.Y)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+void AHDistrictManager::PickPlayerSpawn()
+{
+	if (Roads.Num() == 0)
+	{
+		return;
+	}
+
+	// Open street vertex closest to the district center.
+	const FVector2D Center = DistrictBounds.bIsValid ? DistrictBounds.GetCenter() : FVector2D::ZeroVector;
+	float BestDistSq = TNumericLimits<float>::Max();
+	bool bFound = false;
+	for (const FRoadData& Road : Roads)
+	{
+		for (const FVector2D& Point : Road.Polyline)
+		{
+			if (IsPointBlocked(Point))
+			{
+				continue;
+			}
+			const float DistSq = FVector2D::DistSquared(Point, Center);
+			if (DistSq < BestDistSq)
+			{
+				BestDistSq = DistSq;
+				PlayerSpawnPoint = Point;
+				bFound = true;
+			}
+		}
+	}
+	bHasPlayerSpawn = bFound;
+	UE_LOG(LogTemp, Warning, TEXT("[H District] Player street spawn %s at (%.0f, %.0f)"),
+		bFound ? TEXT("chosen") : TEXT("UNAVAILABLE - keeping placed PlayerStart"),
+		PlayerSpawnPoint.X, PlayerSpawnPoint.Y);
 }
 
 void AHDistrictManager::SpawnZombieWave()
@@ -468,54 +568,25 @@ void AHDistrictManager::SpawnZombieWave()
 
 int32 AHDistrictManager::SpawnZombiesAtRoads(int32 Count)
 {
+	return SpawnZombiesNear(
+		DistrictBounds.bIsValid ? DistrictBounds.GetCenter() : FVector2D::ZeroVector,
+		0.f, TNumericLimits<float>::Max(), Count);
+}
+
+int32 AHDistrictManager::SpawnZombiesNear(const FVector2D& Center, float MinDistM, float MaxDistM, int32 Count)
+{
 	UWorld* World = GetWorld();
 	if (!World || Roads.Num() == 0)
 	{
 		return 0;
 	}
 
-	// Building AABBs (with 1m margin) - zombies spawning inside these would be
-	// stuck in the solid boxes forever. Precompute once per call.
-	struct FBuildingBox
-	{
-		FVector2D Min;
-		FVector2D Max;
-	};
-	TArray<FBuildingBox> BuildingBoxes;
-	BuildingBoxes.Reserve(Buildings.Num());
-	for (const FBuildingData& Building : Buildings)
-	{
-		FBuildingBox Box;
-		Box.Min = FVector2D(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
-		Box.Max = FVector2D(TNumericLimits<float>::Lowest(), TNumericLimits<float>::Lowest());
-		for (const FVector2D& Point : Building.Footprint)
-		{
-			Box.Min = Box.Min.ComponentMin(Point);
-			Box.Max = Box.Max.ComponentMax(Point);
-		}
-		Box.Min -= FVector2D(1.f, 1.f);
-		Box.Max += FVector2D(1.f, 1.f);
-		BuildingBoxes.Add(Box);
-	}
-	const auto IsBlocked = [&BuildingBoxes](const FVector2D& Point) -> bool
-	{
-		for (const FBuildingBox& Box : BuildingBoxes)
-		{
-			if (Box.Min.X <= Point.X && Point.X <= Box.Max.X &&
-				Box.Min.Y <= Point.Y && Point.Y <= Box.Max.Y)
-			{
-				return true;
-			}
-		}
-		return false;
-	};
-
 	int32 Spawned = 0;
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
-		// Try several road vertices; accept the first one on open street.
+		// Rejection-sample street vertices: open street, within the ring.
 		FVector2D Chosen(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
-		for (int32 Attempt = 0; Attempt < 12; ++Attempt)
+		for (int32 Attempt = 0; Attempt < 60; ++Attempt)
 		{
 			const FRoadData& Road = Roads[FMath::RandRange(0, Roads.Num() - 1)];
 			if (Road.Polyline.Num() == 0)
@@ -523,10 +594,35 @@ int32 AHDistrictManager::SpawnZombiesAtRoads(int32 Count)
 				continue;
 			}
 			const FVector2D& Point = Road.Polyline[FMath::RandRange(0, Road.Polyline.Num() - 1)];
-			if (!IsBlocked(Point))
+			if (IsPointBlocked(Point))
 			{
-				Chosen = Point;
-				break;
+				continue;
+			}
+			const float Dist = FVector2D::Distance(Point, Center);
+			if (Dist < MinDistM || Dist > MaxDistM)
+			{
+				continue;
+			}
+			Chosen = Point;
+			break;
+		}
+		// Ring sampling can fail in dense cores (sidewalk vertices sit inside
+		// inflated building AABBs) - fall back to any open street anywhere.
+		if (Chosen.X == TNumericLimits<float>::Max())
+		{
+			for (int32 Attempt = 0; Attempt < 20; ++Attempt)
+			{
+				const FRoadData& Road = Roads[FMath::RandRange(0, Roads.Num() - 1)];
+				if (Road.Polyline.Num() == 0)
+				{
+					continue;
+				}
+				const FVector2D& Point = Road.Polyline[FMath::RandRange(0, Road.Polyline.Num() - 1)];
+				if (!IsPointBlocked(Point))
+				{
+					Chosen = Point;
+					break;
+				}
 			}
 		}
 		if (Chosen.X == TNumericLimits<float>::Max())

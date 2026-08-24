@@ -58,11 +58,28 @@ private:
 	void SpawnRoads();
 	void SpawnLootContainers();
 	void SpawnNavigationBounds();
-	void SpawnZombies();
 	void SpawnZombieWave();
 
 	/** Spawns ZombieWaveSize zombies at random road vertices; returns spawned count. */
 	int32 SpawnZombiesAtRoads(int32 Count);
+
+	/** Spawns zombies on street points in a ring around Center. */
+	int32 SpawnZombiesNear(const FVector2D& Center, float MinDistM, float MaxDistM, int32 Count);
+
+	/** True if the point falls inside any building AABB (+1m margin). */
+	bool IsPointBlocked(const FVector2D& Point) const;
+
+	/** Picks an open street point near the district center as the player spawn. */
+	void PickPlayerSpawn();
+
+	/** Delayed setup: relocate player to a safe street point + seed nearby zombies. */
+	void LateStart();
+
+	struct FBuildingBox
+	{
+		FVector2D Min;
+		FVector2D Max;
+	};
 
 	UMaterialInterface* FindCategoryMaterial(const FString& Category);
 
@@ -82,6 +99,14 @@ private:
 	TArray<TObjectPtr<AHZLootContainer>> Containers;
 
 	FTimerHandle HordeWaveTimer;
+	FTimerHandle LateStartTimer;
+
+	/** Building AABBs with 1m margin, for spawn-point validation. */
+	TArray<FBuildingBox> BuildingBoxes;
+
+	/** Chosen open-street player spawn (local meters). */
+	FVector2D PlayerSpawnPoint = FVector2D::ZeroVector;
+	bool bHasPlayerSpawn = false;
 
 	int32 NumZombiesSpawned = 0;
 };
