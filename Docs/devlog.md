@@ -19,3 +19,12 @@ Per the roadmap's daily shutdown ritual: what moved, what broke, how fixed, tomo
 - Broke/fixed along the way: engine association (custom launcher `.bat`), bundled .NET 10 SDK environment, rocket-build failure from `BuildSettingsVersion.Latest` (environment mismatch), one-sided trimesh collision on roofs (triangle winding corrected), Landscape eye-icon hide persisting vs delete, DefaultPawn ignoring WASD/Space (it is a fly drone — hence the Character swap).
 - In flight, unverified: runtime district loader (Path B), zombie chase AI, pipeline v0.5 (parallel overnight agents) — none count as done until Play-tested in-editor.
 - Tomorrow's first task: run `Docs/thursday-brief.md`; verify overnight C++ in-editor before checking any Week 1 · Thu boxes.
+
+## 2026-08-24 (night shift)
+- Three parallel agents delivered: Path B runtime district loader (HISM per category, JSON v2 consumer), zombie chase AI + nav bounds, docs/devlog/thursday-brief.
+- Headless smoke tests (UnrealEditor-Cmd -game -nullrhi) proved end-to-end: 234 buildings, 3,716 road segments, navmesh, 10/10 zombies, zero fatals.
+- Caught: editor had clobbered DefaultInput.ini on exit (WASD/mouse-yaw mappings lost) - restored, and logged as a recurring hazard.
+- Materials now generated headlessly via Tools/generate_materials.py commandlet (16 solid-color M_HZ_* assets); DistrictManager prefers them, falls back to import scan.
+- Depth pass: ground plane, road ribbons, player health/sprint (Shift)/death-respawn, zombie contact damage (10 per 0.6s within 160cm).
+- Pipeline v0.6: area-POI dedupe (centroid-in-building = same structure twice). Multi-city samples: Portland 314 bldgs/66% classified (best launch candidate), Austin 437/31%.
+- Tomorrow first task: human Play test of the runtime city + zombie chase (Docs/thursday-brief.md).

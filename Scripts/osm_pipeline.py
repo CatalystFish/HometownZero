@@ -206,6 +206,7 @@ def process(elements, bbox):
     lat0, lon0, m_per_deg_lon = project_origin(bbox)
     buildings, roads, pois, skipped = [], [], [], 0
     area_pois = 0
+    area_candidates = []
 
     for el in elements:
         etype = el.get("type")
@@ -271,8 +272,32 @@ def process(elements, bbox):
                     for lon, lat in coords[:-1]]
             if abs(polygon_area(ring)) >= 9.0:
                 cx, cy = polygon_centroid(ring)
-                pois.append((cx, cy, tags))
-                area_pois += 1
+                area_candidates.append((cx, cy, tags))
+
+    # v0.6: drop area-POIs whose centroid falls inside an already-known
+    # building footprint — those are the same structure mapped twice (e.g. a
+    # shop polygon nested in its building outline), not loot signal.
+    deduped = 0
+    boxes = []
+    for b in buildings:
+        xs = [p[0] for p in b["footprint"]]
+        ys = [p[1] for p in b["footprint"]]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    for cx, cy, tags in area_candidates:
+        inside = False
+        for idx, b in enumerate(buildings):
+            bx0, by0, bx1, by1 = boxes[idx]
+            if bx0 <= cx <= bx1 and by0 <= cy <= by1 and \
+                    point_in_ring(cx, cy, b["footprint"]):
+                inside = True
+                break
+        if inside:
+            deduped += 1
+            continue
+        pois.append((cx, cy, tags))
+        area_pois += 1
+    if deduped:
+        print(f"[area ] {deduped} area-POIs deduped (centroid inside a building)")
 
     return buildings, roads, pois, skipped, area_pois
 
