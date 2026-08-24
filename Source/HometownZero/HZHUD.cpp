@@ -40,6 +40,10 @@ void AHZHUD::DrawHUD()
 			FLinearColor(0.9f, 0.9f, 0.7f), 40.f, 40.f);
 	}
 
+	// Controls hint (top-left, under bag count).
+	DrawText(TEXT("WASD move | Mouse look | Shift sprint | LMB attack | E search | ` ghost/fly/walk"),
+		FLinearColor(0.7f, 0.7f, 0.7f), 40.f, 66.f);
+
 	// Search prompt: nearest unopened container within 250cm.
 	AHDistrictManager* Manager = AHDistrictManager::Get(GetWorld());
 	if (Manager)

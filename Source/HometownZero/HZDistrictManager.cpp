@@ -474,21 +474,71 @@ int32 AHDistrictManager::SpawnZombiesAtRoads(int32 Count)
 		return 0;
 	}
 
+	// Building AABBs (with 1m margin) - zombies spawning inside these would be
+	// stuck in the solid boxes forever. Precompute once per call.
+	struct FBuildingBox
+	{
+		FVector2D Min;
+		FVector2D Max;
+	};
+	TArray<FBuildingBox> BuildingBoxes;
+	BuildingBoxes.Reserve(Buildings.Num());
+	for (const FBuildingData& Building : Buildings)
+	{
+		FBuildingBox Box;
+		Box.Min = FVector2D(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+		Box.Max = FVector2D(TNumericLimits<float>::Lowest(), TNumericLimits<float>::Lowest());
+		for (const FVector2D& Point : Building.Footprint)
+		{
+			Box.Min = Box.Min.ComponentMin(Point);
+			Box.Max = Box.Max.ComponentMax(Point);
+		}
+		Box.Min -= FVector2D(1.f, 1.f);
+		Box.Max += FVector2D(1.f, 1.f);
+		BuildingBoxes.Add(Box);
+	}
+	const auto IsBlocked = [&BuildingBoxes](const FVector2D& Point) -> bool
+	{
+		for (const FBuildingBox& Box : BuildingBoxes)
+		{
+			if (Box.Min.X <= Point.X && Point.X <= Box.Max.X &&
+				Box.Min.Y <= Point.Y && Point.Y <= Box.Max.Y)
+			{
+				return true;
+			}
+		}
+		return false;
+	};
+
 	int32 Spawned = 0;
 	for (int32 Index = 0; Index < Count; ++Index)
 	{
-		const FRoadData& Road = Roads[FMath::RandRange(0, Roads.Num() - 1)];
-		if (Road.Polyline.Num() == 0)
+		// Try several road vertices; accept the first one on open street.
+		FVector2D Chosen(TNumericLimits<float>::Max(), TNumericLimits<float>::Max());
+		for (int32 Attempt = 0; Attempt < 12; ++Attempt)
+		{
+			const FRoadData& Road = Roads[FMath::RandRange(0, Roads.Num() - 1)];
+			if (Road.Polyline.Num() == 0)
+			{
+				continue;
+			}
+			const FVector2D& Point = Road.Polyline[FMath::RandRange(0, Road.Polyline.Num() - 1)];
+			if (!IsBlocked(Point))
+			{
+				Chosen = Point;
+				break;
+			}
+		}
+		if (Chosen.X == TNumericLimits<float>::Max())
 		{
 			continue;
 		}
-		const FVector2D& Point = Road.Polyline[FMath::RandRange(0, Road.Polyline.Num() - 1)];
 
 		FActorSpawnParameters Params;
 		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
 		AHZZombie* Zombie = World->SpawnActor<AHZZombie>(
-			FVector(Point.X * 100.f, Point.Y * 100.f, 100.f),
+			FVector(Chosen.X * 100.f, Chosen.Y * 100.f, 100.f),
 			FRotator(0.f, FMath::FRandRange(0.f, 360.f), 0.f),
 			Params);
 		if (Zombie)
